@@ -1,0 +1,177 @@
+#pragma once
+
+#include <utility>
+
+#include <CRSLibtmp/std_type.hpp>
+#include <CRSLibtmp/bit_operation.hpp>
+
+#include "register_map.hpp"
+#include "utility.hpp"
+
+namespace CRSLib::Can::Stm32::RM0008
+{
+	struct FilterConfig final
+	{
+		bool is_list_mode{false};
+		bool is_32bit{true};
+		bool is_fifo1{false};
+
+		static constexpr FilterConfig make_default(const Fifo fifo, const bool is_list_mode = true) noexcept
+		{
+			return FilterConfig{.is_list_mode=is_list_mode, .is_fifo1=(fifo == Fifo::Fifo1)};
+		}
+	};
+
+	namespace FilterManager
+	{
+		/// @brief フィルタバンクの初期化を行う
+		/// @todo FMIの設定
+		/// @tparam n 
+		/// @param can2sb 
+		/// @param filters 
+		template<u8 n>
+		requires (n <= filter_bank_size)
+		inline void initialize(const u8 can2sb, FilterConfig (& filters)[n]) noexcept
+		{
+			constexpr u32 filter_bank_mask = (1U << filter_bank_size) - 1U;
+			{
+				BitOperation::PinnedBit finit{filter_bank->FMaR, RegisterMap::FMaR::FINIT};
+
+				BitOperation::clear_bit(filter_bank->FMaR, RegisterMap::FMaR::CAN2SB);
+				BitOperation::set_bit(filter_bank->FMaR, can2sb << RegisterMap::FMaR::shiftCAN2SB);
+
+				u32 is_list_mode = 0;
+				u32 is_32bit = 0;
+				u32 is_fifo1 = 0;
+
+				{
+					u8 i = 0;
+					for(const auto filter : filters)
+					{
+						is_list_mode |= (filter.is_list_mode ? 1 : 0) << i;
+						is_32bit |= (filter.is_32bit ? 1 : 0) << i;
+						is_fifo1 |= (filter.is_fifo1 ? 1 : 0) << i;
+						++i;
+					}
+				}
+
+				BitOperation::change_masked_range(filter_bank->FMoR, filter_bank_mask, is_list_mode);
+				BitOperation::change_masked_range(filter_bank->FSR, filter_bank_mask, is_32bit);
+				BitOperation::change_masked_range(filter_bank->FFAR, filter_bank_mask, is_fifo1);
+				BitOperation::change_masked_range(filter_bank->FAR, filter_bank_mask, 0x0U);
+			}
+		}
+
+		/// @brief フィルタバンクの初期化を行う
+		/// @param can2sb 
+		inline void initialize(const u8 can2sb) noexcept
+		{
+			constexpr u32 filter_bank_mask = (1U << filter_bank_size) - 1U;
+			{
+				BitOperation::PinnedBit finit{filter_bank->FMaR, RegisterMap::FMaR::FINIT};
+
+				BitOperation::clear_bit(filter_bank->FMaR, RegisterMap::FMaR::CAN2SB);
+				BitOperation::set_bit(filter_bank->FMaR, can2sb << RegisterMap::FMaR::shiftCAN2SB);
+
+				BitOperation::change_masked_range(filter_bank->FMoR, filter_bank_mask, 0x0U);
+				BitOperation::change_masked_range(filter_bank->FSR, filter_bank_mask, 0x0U);
+				BitOperation::change_masked_range(filter_bank->FFAR, filter_bank_mask, 0x0U);
+				BitOperation::change_masked_range(filter_bank->FAR, filter_bank_mask, 0x0U);
+			}
+		}
+
+		inline void activate(const u8 index) noexcept
+		{
+			BitOperation::set_bit(filter_bank->FAR, 1U << index);
+		}
+
+		inline void deactivate(const u8 index) noexcept
+		{
+			BitOperation::clear_bit(filter_bank->FAR, 1U << index);
+		}
+		namespace Implement
+		{
+			inline u32 list32(const u32 id, bool ide, bool rtr) noexcept
+			{
+				constexpr u32 ide_32 = 0x4;
+				constexpr u32 rtr_32 = 0x2;
+				constexpr u32 rshift_ext_id_32 = 11U - 3U;
+				constexpr u32 lshift_std_id_32 = 21U;
+
+				return (id & ~max_std_id & max_ext_id) >> rshift_ext_id_32 | // 拡張IDの上位18bit
+					(id & max_std_id) << lshift_std_id_32 | // 標準IDの11bit
+					(ide ? ide_32 : 0) | // IDE
+					(rtr ? rtr_32 : 0); // RTR
+			}
+		}
+
+		inline u32 make_list32(const u32 id) noexcept
+		{
+			return Implement::list32(id, id > max_std_id, false);
+		}
+
+		inline Filter make_mask32(const u32 id, const u32 id_mask) noexcept
+		{
+			Filter ret;
+
+			ret.FR1 = Implement::list32(id, id > max_std_id, false);
+			ret.FR2 = Implement::list32(id_mask, true, true);
+
+			return ret;
+		}
+
+		namespace Implement
+		{
+			inline u32 list16(const u16 id, bool ide, bool rtr) noexcept
+			{
+				constexpr u32 ide_16 = 0x8;
+				constexpr u32 rtr_16 = 0x10;
+				constexpr u32 rshift_ext_id_16 = 11U + 18U - 3U;
+				constexpr u32 lshift_std_id_16 = 5U;
+
+				return (id & max_ext_id) >> rshift_ext_id_16 | // 拡張IDの上位3bit
+					(id & max_std_id) << lshift_std_id_16 | // 標準IDの11bit
+					(ide ? ide_16 : 0) | // IDE
+					(rtr ? rtr_16 : 0); // RTR
+			}
+		}
+
+		inline u32 make_list16(const u16 id) noexcept
+		{
+			return Implement::list16(id, id > max_std_id, false);
+		}
+
+		inline u32 make_mask16(const u16 id, const u16 id_mask) noexcept
+		{
+			return Implement::list16(id, id > max_std_id, false) |
+				Implement::list16(id_mask, true, true) << 16U;
+		}
+
+		[[nodiscard]] inline bool set_filter(const u8 index, const Filter& filter) noexcept
+		{
+			if(BitOperation::is_bit_clear(filter_bank->FAR, 1U << index))
+			{
+				filter_bank->filter_registers[index] = filter;
+				return true;
+			}
+			else return false;
+		}
+
+
+		/// @brief 深く考えずにフィルタバンクを初期化する
+		/// @tparam n 
+		/// @param id_fifos 受信するIDとそれを入れる先のFifoのstd::pair
+		template<u8 n>
+		requires (n <= filter_bank_size)
+		inline void initialize_you_dont_have_to_think_much(const std::pair<u32, Fifo> (&id_fifos)[n]) noexcept
+		{
+			[]<u8 ... indices>(std::integer_sequence<u8, indices...>, const auto& id_fifos)
+			{
+				FilterConfig filter_configs[] = {FilterConfig::make_default(id_fifos[indices].second) ...};
+				initialize(filter_bank_size, filter_configs);
+				((void)set_filter(indices, Filter{make_list32(id_fifos[indices].first), 0x00u}), ...);
+				(activate(indices), ...);
+			}(std::make_integer_sequence<u8, n>{}, id_fifos);
+		}
+	}
+}

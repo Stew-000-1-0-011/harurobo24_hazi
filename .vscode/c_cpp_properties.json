@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "${workspaceFolder}",
+                "Core\\Inc",
+                "Drivers\\CMSIS\\Include",
+                "Drivers\\CMSIS\\Device\\ST\\STM32F1xx\\Include",
+                "Drivers\\STM32F1xx_HAL_Driver\\Inc"
+            ],
+            "defines": [
+                "_DEBUG",
+                "UNICODE",
+                "_UNICODE",
+                "STM32F103x6",
+                "USE_HAL_DRIVER",
+            ],
+            "windowsSdkVersion": "10.0.19041.0",
+            "compilerPath": "C:/msys64/mingw64/bin/g++.exe",
+            "cStandard": "c17",
+            "intelliSenseMode": "windows-gcc-x64",
+            "cppStandard": "c++20"
+        }
+    ],
+    "version": 4
+}
